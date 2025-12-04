@@ -89,14 +89,14 @@ jobs:
             --glossary config/glossary.csv
 
       - name: Upload extracted files
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@main
         with:
           name: extracted-files
           path: extracted/
           retention-days: 7
 
       - name: Upload translated files
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@main
         with:
           name: translated-files
           path: translated/
@@ -110,7 +110,7 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Download translated files
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@main
         with:
           name: translated-files
           path: translated
@@ -137,7 +137,7 @@ jobs:
             --hhw-path "$env:HHWPATH"
 
       - name: Upload CHM artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@main
         with:
           name: translated-chm
           path: ${{ env.OUTPUT_DIR }}/*.chm
@@ -149,7 +149,7 @@ jobs:
     if: github.event_name == 'push'
     steps:
       - name: Download CHM artifact
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@main
         with:
           name: translated-chm
           path: release
@@ -180,4 +180,5 @@ jobs:
             echo "❌ CHM翻译失败"
             echo "Translate job: ${{ needs.translate.result }}"
             echo "Rebuild job: ${{ needs.rebuild-windows.result }}"
+
           fi
