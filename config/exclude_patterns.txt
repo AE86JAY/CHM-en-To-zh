@@ -1,0 +1,11 @@
+*.exe
+*.dll
+*.png
+*.jpg
+*.gif
+*.ico
+*.css  # 样式文件通常不需要翻译
+*.js   # JavaScript文件
+/vendor/
+/node_modules/
+/.git/

@@ -1,0 +1,61 @@
+name: Manual CHM Translation
+
+on:
+  workflow_dispatch:
+    inputs:
+      chm_url:
+        description: 'CHM文件URL（可选）'
+        required: false
+      chm_file:
+        description: '本地CHM文件路径'
+        required: false
+        default: 'input/help.chm'
+      target_language:
+        description: '目标语言'
+        required: true
+        default: 'zh-CN'
+        type: choice
+        options:
+          - zh-CN
+          - zh-TW
+          - ja
+          - ko
+          - fr
+          - de
+          - es
+      translation_method:
+        description: '翻译方式'
+        required: true
+        default: 'hybrid'
+        type: choice
+        options:
+          - machine     # 纯机器翻译
+          - hybrid      # 机器翻译+术语库
+          - template    # 只生成翻译模板
+
+jobs:
+  manual-translation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Download CHM from URL
+        if: inputs.chm_url != ''
+        run: |
+          mkdir -p input
+          wget -O "input/downloaded.chm" "${{ inputs.chm_url }}"
+          echo "CHM_FILE=input/downloaded.chm" >> $GITHUB_ENV
+        shell: bash
+
+      - name: Use local CHM
+        if: inputs.chm_url == ''
+        run: |
+          echo "CHM_FILE=${{ inputs.chm_file }}" >> $GITHUB_ENV
+        shell: bash
+
+      - name: Run translation
+        run: |
+          echo "开始翻译: ${{ env.CHM_FILE }}"
+          echo "目标语言: ${{ inputs.target_language }}"
+          echo "翻译方式: ${{ inputs.translation_method }}"

@@ -1,0 +1,183 @@
+name: CHM Translation Pipeline
+
+on:
+  push:
+    paths:
+      - 'input/*.chm'  # 监控input目录下的CHM文件
+  workflow_dispatch:    # 手动触发
+    inputs:
+      chm_file:
+        description: 'CHM文件名'
+        required: true
+        default: 'help.chm'
+      target_lang:
+        description: '目标语言'
+        required: true
+        default: 'zh-CN'
+      use_mt:
+        description: '使用机器翻译'
+        required: true
+        default: 'true'
+
+env:
+  PYTHON_VERSION: '3.9'
+  OUTPUT_DIR: 'output'
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      chm_path: ${{ steps.find_chm.outputs.path }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Find CHM file
+        id: find_chm
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            CHM_FILE="${{ github.event.inputs.chm_file }}"
+          else
+            # 查找最新的CHM文件
+            CHM_FILE=$(find input -name "*.chm" -type f | head -1)
+          fi
+          
+          if [ -z "$CHM_FILE" ]; then
+            echo "未找到CHM文件"
+            exit 1
+          fi
+          
+          echo "找到CHM文件: $CHM_FILE"
+          echo "path=$CHM_FILE" >> $GITHUB_OUTPUT
+
+  translate:
+    needs: setup
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y p7zip-full wine  # 用于CHM提取和编译
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install deep-translator beautifulsoup4 chardet
+
+      - name: Extract CHM
+        run: |
+          python scripts/extract_chm.py \
+            --input "${{ needs.setup.outputs.chm_path }}" \
+            --output extracted \
+            --log-level INFO
+
+      - name: Translate content
+        run: |
+          python scripts/translate_html.py \
+            --input extracted \
+            --output translated \
+            --target-lang "${{ github.event.inputs.target_lang || 'zh-CN' }}" \
+            --use-mt "${{ github.event.inputs.use_mt || 'true' }}" \
+            --glossary config/glossary.csv
+
+      - name: Upload extracted files
+        uses: actions/upload-artifact@v3
+        with:
+          name: extracted-files
+          path: extracted/
+          retention-days: 7
+
+      - name: Upload translated files
+        uses: actions/upload-artifact@v3
+        with:
+          name: translated-files
+          path: translated/
+          retention-days: 7
+
+  rebuild-windows:
+    needs: translate
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Download translated files
+        uses: actions/download-artifact@v3
+        with:
+          name: translated-files
+          path: translated
+
+      - name: Setup HTML Help Workshop
+        run: |
+          # 下载HTML Help Workshop
+          $hhwUrl = "https://download.microsoft.com/download/0/A/9/0A939EF6-31C5-4B8F-A3A5-6D849FE6A1E7/htmlhelp.exe"
+          $installerPath = "$env:TEMP\htmlhelp.exe"
+          
+          Invoke-WebRequest -Uri $hhwUrl -OutFile $installerPath
+          Start-Process -FilePath $installerPath -ArgumentList "/Q" -Wait
+          
+          # 添加环境变量
+          $hhwPath = "C:\Program Files (x86)\HTML Help Workshop"
+          echo "HHWPATH=$hhwPath" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Rebuild CHM
+        run: |
+          python scripts/rebuild_chm.py \
+            --input translated \
+            --output "${{ env.OUTPUT_DIR }}" \
+            --project-name "TranslatedHelp" \
+            --hhw-path "$env:HHWPATH"
+
+      - name: Upload CHM artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: translated-chm
+          path: ${{ env.OUTPUT_DIR }}/*.chm
+          retention-days: 30
+
+  release:
+    needs: rebuild-windows
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - name: Download CHM artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: translated-chm
+          path: release
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release/*.chm
+          tag_name: "v$(date +'%Y%m%d-%H%M%S')"
+          name: "Translated CHM $(date +'%Y-%m-%d')"
+          body: |
+            Automatically translated CHM file
+            - Source: ${{ needs.setup.outputs.chm_path }}
+            - Target language: ${{ github.event.inputs.target_lang || 'zh-CN' }}
+            - Translation date: $(date)
+
+  notify:
+    needs: [translate, rebuild-windows]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Send notification
+        run: |
+          if [[ "${{ needs.translate.result }}" == "success" && "${{ needs.rebuild-windows.result }}" == "success" ]]; then
+            echo "✅ CHM翻译完成！"
+            # 这里可以集成Slack、Discord、Email通知
+          else
+            echo "❌ CHM翻译失败"
+            echo "Translate job: ${{ needs.translate.result }}"
+            echo "Rebuild job: ${{ needs.rebuild-windows.result }}"
+          fi

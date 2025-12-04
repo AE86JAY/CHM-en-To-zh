@@ -1,0 +1,22 @@
+# 核心依赖
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+chardet>=5.1.0
+
+# 翻译相关
+deep-translator>=1.11.0
+googletrans==4.0.0rc1
+
+# 配置文件
+PyYAML>=6.0
+python-dotenv>=1.0.0
+
+# 工具
+tqdm>=4.65.0  # 进度条
+colorlog>=6.7.0  # 彩色日志
+requests>=2.31.0
+
+# 开发工具
+pytest>=7.4.0
+black>=23.0.0
+flake8>=6.0.0
