@@ -1,0 +1,28 @@
+{
+  "translation": {
+    "target_language": "zh-CN",
+    "max_retries": 3,
+    "retry_delay": 2,
+    "chunk_size": 4500,
+    "preserve_code_blocks": true,
+    "skip_tags": ["code", "pre", "script", "style", "noscript"],
+    "translatable_tags": ["p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "td", "th", "span", "div", "a", "title", "strong", "b", "i", "em", "label", "caption"]
+  },
+  "chm_processing": {
+    "use_7zip": true,
+    "use_hhc": true,
+    "use_chmcmd": true,
+    "keep_temp_files": false,
+    "timeout_extract": 300,
+    "timeout_compile": 600
+  },
+  "file_patterns": {
+    "input": "**/*.chm",
+    "output_suffix": "_zh-cn",
+    "exclude_patterns": ["*_zh-cn.chm", "*_zh-tw.chm", "*_ja.chm"]
+  },
+  "logging": {
+    "level": "INFO",
+    "log_file": "translation.log"
+  }
+}

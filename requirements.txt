@@ -1,4 +1,6 @@
-beautifulsoup4>=4.9.3
-lxml>=4.6.3
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
 html2text>=2020.1.16
 googletrans==4.0.0rc1
+chm>=0.1.0
+chm-lib>=0.1.0

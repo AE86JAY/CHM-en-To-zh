@@ -1,16 +1,21 @@
-name: Translate CHM Files
+name: Translate CHM Files (Windows)
 
 on:
-  workflow_dispatch:  # 手动触发
+  workflow_dispatch:
     inputs:
       file_pattern:
         description: 'CHM文件匹配模式 (例如: *.chm 或 docs/*.chm)'
         required: true
-        default: '*.chm'
+        default: '**/*.chm'
       target_lang:
         description: '目标语言'
         required: true
         default: 'zh-CN'
+      skip_commit:
+        description: '跳过提交到仓库'
+        required: false
+        default: 'false'
+        type: boolean
   
   push:
     paths:
@@ -19,7 +24,7 @@ on:
 
 jobs:
   translate-chm:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     
     steps:
     - name: Checkout repository
@@ -30,48 +35,156 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.9'
+        python-version: '3.10'
 
-    - name: Install dependencies
+    - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
         pip install beautifulsoup4 lxml html2text googletrans==4.0.0rc1
-        
-        # 安装CHM工具
-        sudo apt-get update
-        sudo apt-get install -y chm2html html2chm
+        pip install chm
+        pip install chm-lib
 
-    - name: Setup translation environment
+    - name: Install 7-Zip
       run: |
-        echo "TARGET_LANG=${{ github.event.inputs.target_lang || 'zh-CN' }}" >> $GITHUB_ENV
-        echo "FILE_PATTERN=${{ github.event.inputs.file_pattern || '*.chm' }}" >> $GITHUB_ENV
+        # 下载并安装7-Zip
+        $url = "https://www.7-zip.org/a/7z2301-x64.msi"
+        $installer = "7z.msi"
+        Invoke-WebRequest -Uri $url -OutFile $installer
+        msiexec /i $installer /quiet /qn /norestart
+        # 添加7-Zip到系统路径
+        $env:Path = "C:\Program Files\7-Zip;$env:Path"
+        [Environment]::SetEnvironmentVariable("Path", $env:Path + ";C:\Program Files\7-Zip", "Machine")
+        echo "7-Zip安装完成"
 
-    - name: Download and setup CHM tools (Windows compatibility)
+    - name: Install HTML Help Workshop (hhc)
       run: |
-        # 下载并安装CHM工具
-        wget -O chmlib.tar.gz http://www.jedrea.com/chmlib/chmlib-0.40.tar.gz
-        tar -xzf chmlib.tar.gz
-        cd chmlib-0.40
-        ./configure && make && sudo make install
-        cd ..
+        # 下载HTML Help Workshop
+        $url = "https://download.microsoft.com/download/0/A/9/0A939EF6-E31C-430F-A3DF-DFAE7960D564/htmlhelp.exe"
+        $installer = "htmlhelp.exe"
+        if (!(Test-Path $installer)) {
+          Invoke-WebRequest -Uri $url -OutFile $installer
+        }
         
-        # 下载extract_chm工具
-        wget https://raw.githubusercontent.com/dottedmag/archivemount-chm/master/extract_chmlib.c
-        gcc -o extract_chm extract_chmlib.c -lchm
+        # 静默安装
+        if (Test-Path $installer) {
+          Start-Process -FilePath $installer -ArgumentList "/Q" -Wait
+          echo "HTML Help Workshop安装完成"
+        } else {
+          echo "警告: HTML Help Workshop下载失败，将使用备用方案"
+        }
+        
+        # 尝试查找hhc.exe路径
+        $hhcPaths = @(
+          "C:\Program Files (x86)\HTML Help Workshop\hhc.exe",
+          "C:\Program Files\HTML Help Workshop\hhc.exe"
+        )
+        
+        foreach ($path in $hhcPaths) {
+          if (Test-Path $path) {
+            echo "找到hhc.exe: $path"
+            $env:Path = "$env:Path;$([System.IO.Path]::GetDirectoryName($path))"
+            break
+          }
+        }
+
+    - name: Install chmcmd (替代工具)
+      run: |
+        # 下载chmcmd作为备用工具
+        $chmcmdDir = "C:\chmcmd"
+        if (!(Test-Path $chmcmdDir)) {
+          New-Item -ItemType Directory -Force -Path $chmcmdDir
+          $url = "https://github.com/dottedmag/chmox/releases/download/1.3/chmox-1.3.zip"
+          $zip = "$chmcmdDir\chmox.zip"
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          
+          # 解压文件
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          [System.IO.Compression.ZipFile]::ExtractToDirectory($zip, $chmcmdDir)
+          
+          # 查找chmcmd.exe
+          $chmcmdExe = Get-ChildItem -Path $chmcmdDir -Recurse -Filter "chmcmd.exe" | Select-Object -First 1
+          if ($chmcmdExe) {
+            $chmcmdPath = $chmcmdExe.DirectoryName
+            $env:Path = "$env:Path;$chmcmdPath"
+            echo "chmcmd安装完成: $chmcmdPath"
+          }
+        }
+
+    - name: Setup environment variables
+      run: |
+        echo "TARGET_LANG=${{ github.event.inputs.target_lang || 'zh-CN' }}" | Out-File -FilePath $env:GITHUB_ENV -Append
+        echo "FILE_PATTERN=${{ github.event.inputs.file_pattern || '**/*.chm' }}" | Out-File -FilePath $env:GITHUB_ENV -Append
+        echo "SKIP_COMMIT=${{ github.event.inputs.skip_commit || 'false' }}" | Out-File -FilePath $env:GITHUB_ENV -Append
 
     - name: Run CHM translation script
-      run: python scripts/translate_chm.py "$FILE_PATTERN"
+      run: |
+        python scripts/translate_chm_windows.py "$env:FILE_PATTERN"
+      shell: cmd
+
+    - name: Upload translated files as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: translated-chm-files
+        path: |
+          **/*_zh-cn.chm
+          **/*_zh-cn/*.chm
+        retention-days: 30
+        if-no-files-found: warn
+        compression-level: 9
+
+    - name: List translated files
+      run: |
+        echo "翻译完成的文件列表:"
+        dir **/*_zh-cn.chm /s /b
+      shell: cmd
 
     - name: Commit and push translated files
+      if: env.SKIP_COMMIT == 'false'
       run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
+        git config --global user.email "action@github.com"
+        git config --global user.name "GitHub Action"
         
-        # 检查是否有新文件
-        if git status --porcelain | grep -q "\.chm$"; then
-          git add **/*_zh-cn.chm
-          git commit -m "Add translated CHM files [skip ci]"
+        # 添加所有翻译后的CHM文件
+        git add **/*_zh-cn.chm
+        
+        # 检查是否有文件需要提交
+        git status --porcelain | findstr "_zh-cn.chm"
+        if %errorlevel% equ 0 (
+          git commit -m "🌐 添加翻译后的CHM文件 [skip ci]"
           git push
-        else
-          echo "No new translated CHM files to commit"
-        fi
+          echo "已提交翻译文件到仓库"
+        ) else (
+          echo "没有新的翻译文件需要提交"
+        )
+      shell: cmd
+
+    - name: Create summary report
+      run: |
+        echo "# CHM文件翻译报告" >> $env:GITHUB_STEP_SUMMARY
+        echo "" >> $env:GITHUB_STEP_SUMMARY
+        echo "## 翻译详情" >> $env:GITHUB_STEP_SUMMARY
+        echo "" >> $env:GITHUB_STEP_SUMMARY
+        echo "- **翻译时间**: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" >> $env:GITHUB_STEP_SUMMARY
+        echo "- **目标语言**: ${{ env.TARGET_LANG }}" >> $env:GITHUB_STEP_SUMMARY
+        echo "- **文件模式**: ${{ env.FILE_PATTERN }}" >> $env:GITHUB_STEP_SUMMARY
+        echo "" >> $env:GITHUB_STEP_SUMMARY
+        
+        # 统计文件数量
+        $count = (Get-ChildItem -Path . -Recurse -Filter "*_zh-cn.chm" | Measure-Object).Count
+        echo "- **翻译文件数**: $count" >> $env:GITHUB_STEP_SUMMARY
+        echo "" >> $env:GITHUB_STEP_SUMMARY
+        
+        # 列出文件
+        if ($count -gt 0) {
+          echo "## 翻译完成的文件" >> $env:GITHUB_STEP_SUMMARY
+          echo "" >> $env:GITHUB_STEP_SUMMARY
+          Get-ChildItem -Path . -Recurse -Filter "*_zh-cn.chm" | ForEach-Object {
+            $relPath = [System.IO.Path]::GetRelativePath($pwd, $_.FullName)
+            echo "- $relPath" >> $env:GITHUB_STEP_SUMMARY
+          }
+        } else {
+          echo "## 未找到翻译文件" >> $env:GITHUB_STEP_SUMMARY
+          echo "" >> $env:GITHUB_STEP_SUMMARY
+          echo "未生成任何翻译文件，请检查配置和日志。" >> $env:GITHUB_STEP_SUMMARY
+        }
+      shell: pwsh
